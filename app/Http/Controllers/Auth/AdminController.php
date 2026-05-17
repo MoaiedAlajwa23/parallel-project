@@ -27,6 +27,7 @@ class AdminController extends BaseController
         $user = $this->authService->registerAdmin($request->validated());
         return $this->successResponse($user, 'Admin registered successfully', 201);
     }
+    
 
     public function login(LoginRequest $request)
     {
