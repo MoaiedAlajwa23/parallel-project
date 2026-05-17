@@ -12,12 +12,10 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('monthly_sales_temp', function (Blueprint $table) {
-                $table->id();
+            $table->id();
 
             $table->integer('year');
-
             $table->integer('month');
-
             $table->decimal('total_sales', 15, 2);
 
             $table->integer('orders_count');

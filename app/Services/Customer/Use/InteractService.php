@@ -199,9 +199,6 @@ class InteractService
                         $cart->update([
                             'status'=>'completed'
                         ]);
-                    // $cart->update([
-                    //     'status' => 'completed'
-                    // ]);
 
                     DB::afterCommit(function () use ($order) {
                         PaymentSimulateJob::dispatch($order);

@@ -7,33 +7,48 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
 
-class ProcessDailySalesChunkJob implements ShouldQueue
+class ProcessMonthlySalesChunkJob implements ShouldQueue
 {
     use Queueable;
 
+    public $tries = 3;
+
+    public $timeout = 120;
+
     public function __construct(
-        public array $orderIds
+        public array $orderIds,
+        public int $year,
+        public int $month
     ) {}
 
     public function handle(): void
     {
-        $orders = Order::whereIn('id', $this->orderIds)->get();
+        $orders = Order::with('products')
+            ->whereIn('id', $this->orderIds)
+            ->get();
 
-        $totalSales = $orders->sum('total_price');
-
-        $ordersCount = $orders->count();
+        $totalSales = 0;
 
         $productsSold = 0;
 
         foreach ($orders as $order) {
 
-            $productsSold += $order->products()->count();
+            $totalSales += $order->total_price;
+
+            foreach ($order->products as $product) {
+
+                $productsSold += $product->pivot->quantity;
+            }
         }
 
-        DB::table('daily_sales_temp')->insert([
+        DB::table('monthly_sales_temp')->insert([
+            'year' => $this->year,
+            'month' => $this->month,
             'total_sales' => $totalSales,
-            'orders_count' => $ordersCount,
+            'orders_count' => $orders->count(),
             'products_sold' => $productsSold,
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 }
