@@ -11,21 +11,20 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('monthly_sales_reports', function (Blueprint $table) {
-            $table->id();
+        Schema::create('monthly_sales_temp', function (Blueprint $table) {
+                $table->id();
+
             $table->integer('year');
 
             $table->integer('month');
 
-            $table->decimal('total_sales', 15, 2)->default(0);
+            $table->decimal('total_sales', 15, 2);
 
-            $table->integer('orders_count')->default(0);
+            $table->integer('orders_count');
 
-            $table->integer('products_sold')->default(0);
+            $table->integer('products_sold');
 
-            $table->decimal('average_order_value', 15, 2)->default(0);
             $table->timestamps();
-             $table->unique(['year', 'month']);
         });
     }
 
@@ -34,6 +33,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('monthly_sales_reports');
+        Schema::dropIfExists('monthly_sales_temp');
     }
 };
