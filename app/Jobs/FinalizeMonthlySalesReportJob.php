@@ -5,11 +5,13 @@ namespace App\Jobs;
 use App\Models\MonthlySalesReport;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 
 class FinalizeMonthlySalesReportJob implements ShouldQueue
 {
-    use Queueable;
+    use Queueable,InteractsWithQueue, SerializesModels;
 
     public function __construct(
         public int $year,
@@ -50,5 +52,6 @@ class FinalizeMonthlySalesReportJob implements ShouldQueue
             ->where('year', $this->year)
             ->where('month', $this->month)
             ->delete();
+        
     }
 }

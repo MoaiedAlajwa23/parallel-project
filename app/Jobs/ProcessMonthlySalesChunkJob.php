@@ -5,11 +5,13 @@ namespace App\Jobs;
 use App\Models\Order;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 
 class ProcessMonthlySalesChunkJob implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, InteractsWithQueue, SerializesModels;
 
     public $tries = 3;
 
@@ -23,6 +25,7 @@ class ProcessMonthlySalesChunkJob implements ShouldQueue
 
     public function handle(): void
     {
+        
         $orders = Order::with('products')
             ->whereIn('id', $this->orderIds)
             ->get();

@@ -7,6 +7,7 @@ use App\Jobs\ProcessDailySalesChunkJob;
 use App\Jobs\ProcessMonthlySalesChunkJob;
 use App\Models\Order;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class GenerateMonthlySalesReport extends Command
 {
@@ -35,6 +36,7 @@ class GenerateMonthlySalesReport extends Command
             $year,
             $month
         )->delay(now()->addMinutes(1));
+
     }
 }  
 
