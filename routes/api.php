@@ -51,9 +51,7 @@ Route::prefix('customer/use')->group(function () {
     Route::post('/checkout', [InteractController::class, 'checkout']);
 
 });
-Route::get('/test', function () {
-    return view('welcome');
-});
+
 Route::get('/json-test', function () {
     return response()->json([
         'status'=>true,
@@ -62,6 +60,21 @@ Route::get('/json-test', function () {
         'radius'=>'cache m1234 if either',
         'warm'=>234.6
     ],200);
+});
+
+Route::get('/test', function () {
+    
+    return response()->json([
+        'message' => 'Response from Laravel Server',
+        'object' => [
+            'name' => 'Test Object',
+            'value' => 123,
+            'nested' => [
+                'key' => 'Nested Value'
+            ]
+        ],
+        'port' => request()->server('SERVER_PORT')
+    ]);
 });
 
 

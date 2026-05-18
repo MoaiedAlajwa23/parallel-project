@@ -10,3 +10,11 @@ Route::get('/test', function () {
         'time' => now()
     ]);
 });
+Route::get('/test', function () {
+    
+    return response()->json([
+        'message' => 'Response from Laravel Server',
+        //'port' => env('APP_PORT'),
+        'port' => request()->server('SERVER_PORT')
+    ]);
+});
