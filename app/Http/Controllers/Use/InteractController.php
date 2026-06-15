@@ -5,11 +5,13 @@ namespace App\Http\Controllers\Use;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Customer\AddToCartRequest;
 use App\Http\Requests\Customer\DepositRequest;
+use App\Jobs\SyncProductViews;
 use App\Models\Product;
 use App\Services\Customer\Use\InteractService;
 use App\Traits\ResourceTrait;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller as BaseController;
+use Illuminate\Support\Facades\Redis;
 class InteractController extends BaseController
 {
     use ResourceTrait;
@@ -27,6 +29,32 @@ class InteractController extends BaseController
         return $this->successResponse($products, 'Products retrieved successfully');
 
     }
+
+
+    public function showProductById($id)
+    {
+        $views = Redis::incr("product_views:{$id}");
+        
+        // ترحيل البيانات للقاعدة كل 50 زيارة لتخفيف عمليات I/O
+        if ($views % 50 === 0) {
+            SyncProductViews::dispatch($id, $views);
+        }
+
+        // 2. Cache-Aside Pattern (قراءة البيانات)
+        $ttl = 86400; // Time-To-Live (TTL): 24 hours [cite: 123-125]
+        $cacheKey = "product_details:{$id}";
+
+        $product = Cache::remember($cacheKey, $ttl, function () use ($id) {
+            // الاستعلام الثقيل يُنفذ فقط عند الـ Cache Miss
+            return Product::with('category_id')->findOrFail($id);
+        });
+
+        return view('products.show', compact('product'));
+    }
+
+
+
+
 
     public function listCategories(Request $request)
     {
