@@ -224,6 +224,7 @@ class InteractService
 
 public function checkout1($request)
 {
+        $var = "kkk";
     $userId = auth()->id();
 
     try {
