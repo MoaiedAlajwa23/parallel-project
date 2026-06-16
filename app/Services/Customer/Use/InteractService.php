@@ -219,10 +219,116 @@ class InteractService
     }
 }
 
+// ==================  optimistic locking  ==================
 
 
+public function checkout1($request)
+{
+    $userId = auth()->id();
 
+    try {
+        // حماية على مستوى التطبيق لمنع المستخدم نفسه من النقر المزدوج (ممتاز جداً)
+        return Cache::lock('checkout-user-'.$userId, 10)
+            ->block(5, function () use ($request, $userId) {
 
+                return DB::transaction(function () use ($request, $userId) {
+
+                    // 1. قراءة بيانات المستخدم بدون قفل تشاؤمي
+                    $user = User::where('id', $userId)
+                        ->with('balance')
+                        ->first();
+
+                    // 2. قراءة السلة بدون قفل تشاؤمي
+                    $cart = Cart::where('user_id', $userId)
+                        ->where('status', 'active')
+                        ->with('products')
+                        ->first();
+
+                    if (!$cart || $cart->products->isEmpty()) {
+                        throw new \Exception('Cart is empty');
+                    }
+
+                    $totalPrice = 0;
+
+                    // 3. معالجة المنتجات (هنا يكمن سحر القفل المتفائل)
+                    foreach ($cart->products as $product) {
+
+                        // نقرأ حالة المنتج الحالية ورقم إصداره بدون أي أقفال
+                        $currentProduct = Product::find($product->id);
+
+                        if ($currentProduct->stock < 1) {
+                            throw new \Exception("Product {$currentProduct->name} out of stock");
+                        }
+
+                        $totalPrice += $currentProduct->price;
+
+                        // تحديث المخزون برمجياً باستخدام شرط رقم الإصدار
+                        $updated = DB::table('products')
+                            ->where('id', $currentProduct->id)
+                            ->where('version', $currentProduct->version) // شرط القفل المتفائل
+                            ->update([
+                                'stock' => $currentProduct->stock - 1, // خصم الكمية
+                                'version' => $currentProduct->version + 1 // زيادة رقم الإصدار
+                            ]);
+
+                        // التحقق من التضارب (Race Condition)
+                        if ($updated === 0) {
+                            throw new \Exception("تضارب: المنتج {$currentProduct->name} تم شراؤه من قبل مستخدم آخر في هذه اللحظة. يرجى المحاولة مرة أخرى.");
+                        }
+                    }
+
+                    // 4. التحقق من الرصيد وخصمه
+                    $balance = $user->balance;
+
+                    if ($balance->amount < $totalPrice) {
+                        throw new \Exception('Insufficient balance');
+                    }
+
+                    $balance->decrement('amount', $totalPrice);
+
+                    // 5. إنشاء الطلب
+                    $order = Order::create([
+                        'user_id' => $user->id,
+                        'total_price' => $totalPrice,
+                        'status' => 'pending',
+                        'discount' => $balance->getDiscount(),
+                        'shipping_address' => $request->shipping_address,
+                        'notes' => $request->notes,
+                    ]);
+
+                    // ربط المنتجات بالطلب
+                    foreach ($cart->products as $product) {
+                        $order->products()->attach($product->id, [
+                            'price_at_purchase' => $product->price,
+                            'quantity' => 1
+                        ]);
+                    }
+                    
+                    // إفراغ السلة
+                    $cart->products()->detach();
+
+                    $cart->update([
+                        'status' => 'completed'
+                    ]);
+
+                    // 6. ترحيل المهام غير المتزامنة بعد نجاح المعاملة
+                    DB::afterCommit(function () use ($order) {
+                        PaymentSimulateJob::dispatch($order);
+                        GenerateInvoiceJob::dispatch($order);
+                        SendOrderNotificationJob::dispatch($order);
+                    });
+
+                    return [
+                        true,
+                        $order->id
+                    ];
+                });
+            });
+
+    } catch (\Throwable $th) {
+        return [false, $th->getMessage()];
+    }
+}
 
 
 

@@ -19,7 +19,7 @@ return new class extends Migration
             $table->decimal('price', 10, 2)->unsigned()->default(0.00);
             $table->unsignedInteger('stock')->default(0);
             $table->boolean('is_active')->default(true);
-
+            $table->integer('version')->default(1); // For optimistic locking
             $table->timestamps();
         });
     }
