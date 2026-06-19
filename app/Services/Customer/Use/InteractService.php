@@ -5,6 +5,7 @@ namespace App\Services\Customer\Use;
 use App\Jobs\GenerateInvoiceJob;
 use App\Jobs\PaymentSimulateJob;
 use App\Jobs\SendOrderNotificationJob;
+use App\Jobs\SyncProductViews;
 use App\Models\Balance;
 use App\Models\Cart;
 use App\Models\CartProduct;
@@ -14,6 +15,7 @@ use App\Models\ProductCategory;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Redis;
 class InteractService
 {
     /**
@@ -22,22 +24,32 @@ class InteractService
     public function __construct()
     {
     }
+
+
     public function listProducts($request)
     {
         try {
 
             $perPage = (int) $request->query('per_page', 3);
-            $perPage = $perPage > 0
-                ? min($perPage, 50)
-                : 15;
-            $products = Product::query()
-                ->latest()
-                ->paginate($perPage);
+            $perPage = $perPage > 0 ? min($perPage, 50) : 15;
+
+            $page = (int) $request->query('page', 1);
+
+            $cacheKey = "products_list_page_{$page}_per_{$perPage}";
+            $ttl = 86400;
+
+            $products = Cache::tags(['products_list'])->remember($cacheKey, $ttl, function () use ($perPage) {
+
+                return Product::query()
+                    ->latest()
+                    ->paginate($perPage);
+            });
+
             return $products;
+
         } catch (\Throwable $th) {
             return null;
         }
-
     }
 
     public function listCategories($request)
@@ -52,6 +64,25 @@ class InteractService
             return null;
         }
     }
+
+
+        public function showProductById($id)
+    {
+        $views = Redis::incr("product_views:{$id}");
+        if ($views % 50 === 0) {
+            SyncProductViews::dispatch($id, $views);
+        }
+
+        $ttl = 86400;
+        $cacheKey = "product_details:{$id}";
+
+        $product = Cache::remember($cacheKey, $ttl, function () use ($id) {
+            return Product::with('category')->findOrFail($id);
+        });
+
+        return $product;
+    }
+
 
     public function addToCart($request)
     {
@@ -124,214 +155,102 @@ class InteractService
 
 
     public function checkout($request)
-{
-    $userId = auth()->id();
+    {
+        $userId = auth()->id();
 
-    try {
+        try {
+            return Cache::lock('checkout-user-' . $userId, 10)
+                ->block(5, function () use ($request, $userId) {
 
-        return Cache::lock('checkout-user-'.$userId, 10)
-            ->block(5, function () use ($request, $userId) {
+                    return DB::transaction(function () use ($request, $userId) {
 
-                return DB::transaction(function () use ($request, $userId) {
-
-                    $user = User::where('id', $userId)
-                        ->lockForUpdate()
-                        ->with('balance')
-                        ->first();
-
-                    $cart = Cart::where('user_id', $userId)
-                        ->where('status', 'active')
-                        ->with('products')
-                        ->lockForUpdate()
-                        ->first();
-
-                    if (!$cart || $cart->products->isEmpty()) {
-                        throw new \Exception('Cart is empty');
-                    }
-
-                    $totalPrice = 0;
-
-                    foreach ($cart->products as $product) {
-
-                        $lockedProduct = Product::where('id', $product->id)
-                            ->lockForUpdate()
+                        $user = User::where('id', $userId)
+                            ->with([
+                                'balance' => function ($query) {
+                                    $query->lockForUpdate();
+                                }
+                            ])
                             ->first();
 
-                        if ($lockedProduct->stock < 1) {
+                        $cart = Cart::where('user_id', $userId)
+                            ->where('status', 'active')
+                            ->with('products')
+                            ->first();
 
-                            throw new \Exception(
-                                "Product {$lockedProduct->name} out of stock"
-                            );
+                        if (!$cart || $cart->products->isEmpty()) {
+                            throw new \Exception('Cart is empty');
                         }
 
-                        $totalPrice += $lockedProduct->price;
+                        $totalPrice = 0;
+                        $orderProductsData = [];
 
-                        $lockedProduct->decrement('stock');
-                    }
+                        foreach ($cart->products as $product) {
 
-                    $balance = $user->balance;
+                            $requestedQty = $product->pivot->quantity ?? 1;
 
-                    if ($balance->amount < $totalPrice) {
-                        throw new \Exception('Insufficient balance');
-                    }
+                            $currentProduct = Product::find($product->id);
 
-                    $balance->decrement('amount', $totalPrice);
+                            if ($currentProduct->stock < $requestedQty) {
+                                throw new \Exception("The requested quantity for product {$currentProduct->name} is not available.");
+                            }
 
-                    $order = Order::create([
-                        'user_id' => $user->id,
-                        'total_price' => $totalPrice,
-                        'status' => 'pending',
-                        'discount' => $balance->getDiscount(),
-                        'shipping_address' => $request->shipping_address,
-                        'notes' => $request->notes,
-                    ]);
+                            $totalPrice += ($currentProduct->price * $requestedQty);
 
-                    foreach ($cart->products as $product) {
+                            $updated = DB::table('products')
+                                ->where('id', $currentProduct->id)
+                                ->where('version', $currentProduct->version)
+                                ->update([
+                                    'stock' => $currentProduct->stock - $requestedQty,
+                                    'version' => $currentProduct->version + 1
+                                ]);
 
-                        $order->products()->attach($product->id, [
-                            'price_at_purchase' => $product->price,
-                            'quantity' => 1
+                            if ($updated === 0) {
+                                throw new \Exception("Conflict: The product {$currentProduct->name} has been updated by another user. Please try again.");
+                            }
+
+                            $orderProductsData[$currentProduct->id] = [
+                                'price_at_purchase' => $currentProduct->price,
+                                'quantity' => $requestedQty
+                            ];
+                        }
+                        $balance = $user->balance;
+
+                        if ($balance->amount < $totalPrice) {
+                            throw new \Exception('Insufficient balance');
+                        }
+
+                        $balance->decrement('amount', $totalPrice);
+
+                        $order = Order::create([
+                            'user_id' => $user->id,
+                            'total_price' => $totalPrice,
+                            'status' => 'pending',
+                            'discount' => method_exists($balance, 'getDiscount') ? $balance->getDiscount() : 0,
+                            'shipping_address' => $request->shipping_address,
+                            'notes' => $request->notes,
                         ]);
-                    }
-                    
-                    $cart->products()->detach();
+                        $order->products()->attach($orderProductsData);
+
+                        $cart->products()->detach();
 
                         $cart->update([
-                            'status'=>'completed'
+                            'status' => 'completed'
                         ]);
 
-                    DB::afterCommit(function () use ($order) {
-                        PaymentSimulateJob::dispatch($order);
-                        GenerateInvoiceJob::dispatch($order);
-                        SendOrderNotificationJob::dispatch($order);
+                        DB::afterCommit(function () use ($order) {
+                            PaymentSimulateJob::dispatch($order);
+                            GenerateInvoiceJob::dispatch($order);
+                            SendOrderNotificationJob::dispatch($order);
+                        });
+
+                        return [true, $order->id];
                     });
-
-                    return [
-                        true,
-                        $order->id
-                    ];
                 });
-            });
 
-    } catch (\Throwable $th) {
-
-        return [false, $th->getMessage()];
+        } catch (\Throwable $th) {
+            return [false, $th->getMessage()];
+        }
     }
-}
-
-// ==================  optimistic locking  ==================
-
-
-public function checkout1($request)
-{
-        $var = "kkk";
-    $userId = auth()->id();
-
-    try {
-        // حماية على مستوى التطبيق لمنع المستخدم نفسه من النقر المزدوج (ممتاز جداً)
-        return Cache::lock('checkout-user-'.$userId, 10)
-            ->block(5, function () use ($request, $userId) {
-
-                return DB::transaction(function () use ($request, $userId) {
-
-                    // 1. قراءة بيانات المستخدم بدون قفل تشاؤمي
-                    $user = User::where('id', $userId)
-                        ->with('balance')
-                        ->first();
-
-                    // 2. قراءة السلة بدون قفل تشاؤمي
-                    $cart = Cart::where('user_id', $userId)
-                        ->where('status', 'active')
-                        ->with('products')
-                        ->first();
-
-                    if (!$cart || $cart->products->isEmpty()) {
-                        throw new \Exception('Cart is empty');
-                    }
-
-                    $totalPrice = 0;
-
-                    // 3. معالجة المنتجات (هنا يكمن سحر القفل المتفائل)
-                    foreach ($cart->products as $product) {
-
-                        // نقرأ حالة المنتج الحالية ورقم إصداره بدون أي أقفال
-                        $currentProduct = Product::find($product->id);
-
-                        if ($currentProduct->stock < 1) {
-                            throw new \Exception("Product {$currentProduct->name} out of stock");
-                        }
-
-                        $totalPrice += $currentProduct->price;
-
-                        // تحديث المخزون برمجياً باستخدام شرط رقم الإصدار
-                        $updated = DB::table('products')
-                            ->where('id', $currentProduct->id)
-                            ->where('version', $currentProduct->version) // شرط القفل المتفائل
-                            ->update([
-                                'stock' => $currentProduct->stock - 1, // خصم الكمية
-                                'version' => $currentProduct->version + 1 // زيادة رقم الإصدار
-                            ]);
-
-                        // التحقق من التضارب (Race Condition)
-                        if ($updated === 0) {
-                            throw new \Exception("تضارب: المنتج {$currentProduct->name} تم شراؤه من قبل مستخدم آخر في هذه اللحظة. يرجى المحاولة مرة أخرى.");
-                        }
-                    }
-
-                    // 4. التحقق من الرصيد وخصمه
-                    $balance = $user->balance;
-
-                    if ($balance->amount < $totalPrice) {
-                        throw new \Exception('Insufficient balance');
-                    }
-
-                    $balance->decrement('amount', $totalPrice);
-
-                    // 5. إنشاء الطلب
-                    $order = Order::create([
-                        'user_id' => $user->id,
-                        'total_price' => $totalPrice,
-                        'status' => 'pending',
-                        'discount' => $balance->getDiscount(),
-                        'shipping_address' => $request->shipping_address,
-                        'notes' => $request->notes,
-                    ]);
-
-                    // ربط المنتجات بالطلب
-                    foreach ($cart->products as $product) {
-                        $order->products()->attach($product->id, [
-                            'price_at_purchase' => $product->price,
-                            'quantity' => 1
-                        ]);
-                    }
-                    
-                    // إفراغ السلة
-                    $cart->products()->detach();
-
-                    $cart->update([
-                        'status' => 'completed'
-                    ]);
-
-                    // 6. ترحيل المهام غير المتزامنة بعد نجاح المعاملة
-                    DB::afterCommit(function () use ($order) {
-                        PaymentSimulateJob::dispatch($order);
-                        GenerateInvoiceJob::dispatch($order);
-                        SendOrderNotificationJob::dispatch($order);
-                    });
-
-                    return [
-                        true,
-                        $order->id
-                    ];
-                });
-            });
-
-    } catch (\Throwable $th) {
-        return [false, $th->getMessage()];
-    }
-}
-
-
 
 
 }

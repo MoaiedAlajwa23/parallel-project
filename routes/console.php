@@ -9,3 +9,5 @@ Artisan::command('inspire', function () {
 
 Schedule::command('sales:monthly')
     ->monthly();
+
+Schedule::command('cache:prime')->hourly();

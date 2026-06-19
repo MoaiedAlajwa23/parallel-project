@@ -20,6 +20,8 @@ class Product extends Model
         'price',
         'stock',
         'is_active',
+        'views',
+        'version',
     ];
 
     public function category()
@@ -41,5 +43,18 @@ class Product extends Model
     }
     public function getStock(){
         return $this->stock;
+    }
+    public function getViews(){
+        return $this->views;
+    }
+    public function getVersion()
+    {
+        return $this->version;
+    }
+    
+
+    public function orders()
+    {
+        return $this->belongsToMany(Order::class, 'order_products')->withPivot('quantity','price_at_purchase');
     }
 }

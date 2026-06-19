@@ -20,6 +20,7 @@ return new class extends Migration
             $table->unsignedInteger('stock')->default(0);
             $table->boolean('is_active')->default(true);
             $table->integer('version')->default(1); // For optimistic locking
+            $table->unsignedInteger('views')->default(0); // For tracking product views
             $table->timestamps();
         });
     }

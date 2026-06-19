@@ -11,13 +11,14 @@ use App\Services\Customer\Use\InteractService;
 use App\Traits\ResourceTrait;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller as BaseController;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
 class InteractController extends BaseController
 {
     use ResourceTrait;
     public function __construct(protected InteractService $interactService)
     {
-        $this->middleware(['auth:sanctum', 'customer'])->except('listProducts', 'listCategories');
+        $this->middleware(['auth:sanctum', 'customer'])->except('listProducts', 'listCategories', 'bestSellers', 'showProductById');
     }
 
     public function listProducts(Request $request)
@@ -30,30 +31,27 @@ class InteractController extends BaseController
 
     }
 
-
-    public function showProductById($id)
+    public function showProductById(Request $request)
     {
-        $views = Redis::incr("product_views:{$id}");
-        
-        // ترحيل البيانات للقاعدة كل 50 زيارة لتخفيف عمليات I/O
-        if ($views % 50 === 0) {
-            SyncProductViews::dispatch($id, $views);
+        $id = $request->query('id');
+        $product = $this->interactService->showProductById($id);
+        if (is_null($product)) {
+            return $this->errorResponse('Product not found', 404);
         }
-
-        // 2. Cache-Aside Pattern (قراءة البيانات)
-        $ttl = 86400; // Time-To-Live (TTL): 24 hours [cite: 123-125]
-        $cacheKey = "product_details:{$id}";
-
-        $product = Cache::remember($cacheKey, $ttl, function () use ($id) {
-            // الاستعلام الثقيل يُنفذ فقط عند الـ Cache Miss
-            return Product::with('category_id')->findOrFail($id);
-        });
-
-        return view('products.show', compact('product'));
+        return $this->successResponse($product, 'Product retrieved successfully');
     }
 
 
+    public function bestSellers()
+    {
+        try {
+            $bestSellers = Cache::tags(['products_list'])->get('store:bestsellers', []);
+            return $this->successResponse($bestSellers, 'The best-selling products have been successfully brought in');
 
+        } catch (\Throwable $th) {
+            return $this->errorResponse('An internal error occurred', 500);
+        }
+    }
 
 
     public function listCategories(Request $request)
