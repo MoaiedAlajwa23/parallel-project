@@ -45,39 +45,14 @@ Route::prefix('admin/manage')->group(function () {
 Route::prefix('customer/use')->group(function () {
     Route::get('/browse-products', [InteractController::class, 'listProducts']);
     Route::get('/browse-categories', [InteractController::class, 'listCategories']);
-    Route::post('/view-product', [InteractController::class, 'viewProduct']);
+    Route::get('/best-sellers', [InteractController::class, 'bestSellers']);
+    
     Route::post('/add-to-cart', [InteractController::class, 'addToCart']);
     Route::post('/deposit', [InteractController::class, 'deposit']);
     Route::post('/checkout', [InteractController::class, 'checkout']);
-
-});
-
-Route::get('/json-test', function () {
-    return response()->json([
-        'status'=>true,
-        'message'=>'sans json json dark either offered value  m1234 either absolute',
-        'm1234'=>'megabytes radius',
-        'radius'=>'cache m1234 if either',
-        'warm'=>234.6
-    ],200);
-});
-
-Route::get('/test', function () {
+    Route::post('/show-product', [InteractController::class, 'showProductById']);
     
-    return response()->json([
-        'message' => 'Response from Laravel Server',
-        'object' => [
-            'name' => 'Test Object',
-            'value' => 123,
-            'nested' => [
-                'key' => 'Nested Value'
-            ]
-        ],
-        'port' => request()->server('SERVER_PORT')
-    ]);
-});
-
-
+    });
 
 
 
