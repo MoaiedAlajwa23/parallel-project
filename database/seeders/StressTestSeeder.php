@@ -33,7 +33,7 @@ class StressTestSeeder extends Seeder
         );
 
 
-        $users = User::factory(100)->create([
+        $users = User::factory(200)->create([
             'password' => bcrypt('password123')
         ]);
 
@@ -53,7 +53,7 @@ class StressTestSeeder extends Seeder
                 
                 DB::table('user_roles')->insert([
                     'user_id' => $user->id,
-                    'role_id' => $randomRoleId,
+                    'role_id' => 2,
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
@@ -61,7 +61,7 @@ class StressTestSeeder extends Seeder
 
                 Balance::create([
                     'user_id' => $user->id,
-                    'amount' => 100000.00, 
+                    'amount' => 1000000.00, 
                 ]);
 
 

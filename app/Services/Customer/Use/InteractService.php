@@ -66,7 +66,7 @@ class InteractService
     }
 
 
-        public function showProductById($id)
+    public function showProductById($id)
     {
         $views = Redis::incr("product_views:{$id}");
         if ($views % 50 === 0) {
@@ -83,6 +83,30 @@ class InteractService
         return $product;
     }
 
+
+
+    public function bestSellersSlow()
+    {
+        $bestsellers = Product::query()
+            ->where('is_active', true)
+  
+            ->whereHas('orderProducts', function ($query) {
+                $query->whereHas('order', function ($orderQuery) {
+                    $orderQuery->where('status', 'completed');
+                });
+            })
+            ->withSum(['orderProducts as total_sold' => function ($query) {
+                $query->whereHas('order', function ($orderQuery) {
+                    $orderQuery->where('status', 'completed');
+                });
+            }], 'quantity')
+
+            ->orderByDesc('total_sold')
+            ->take(10)
+            ->get();
+
+        return $bestsellers;
+    }
 
     public function addToCart($request)
     {
@@ -101,25 +125,27 @@ class InteractService
                     if (!$product || !$product->is_active) {
                         throw new \Exception('Product not found');
                     }
-                    if ($request->quantity >= $product->getStock()) {
-                        throw new \Exception("Quantity out of bount repository");
+
+                    if ($quantity > $product->getStock()) {
+                        throw new \Exception("Quantity out of bound repository");
                     }
 
                     $cart = Cart::firstOrCreate([
                         'user_id' => $userId,
                         'status' => 'active'
                     ]);
+
                     $existing = DB::table('cart_products')
                         ->where('cart_id', $cart->id)
                         ->where('product_id', $productId)
                         ->first();
 
                     if ($existing) {
+
                         DB::table('cart_products')
                             ->where('cart_id', $cart->id)
                             ->where('product_id', $productId)
                             ->increment('quantity', $quantity);
-
                     } else {
 
                         $cart->products()->attach($productId, [
@@ -133,23 +159,23 @@ class InteractService
     }
 
 
-    public function deposit(array $deposit)
+public function deposit(array $deposit)
     {
         $userId = auth()->id();
 
-        return DB::transaction(function () use ($deposit, $userId) {
+        return Cache::lock('deposit-user-' . $userId, 5)->block(2, function () use ($deposit, $userId) {
 
-            $balance = Balance::where('user_id', $userId)
-                ->lockForUpdate()
-                ->first();
-            if (!$balance) {
-                $balance = Balance::create([
-                    'user_id' => $userId,
-                    'amount' => 0
-                ]);
-            }
-            $balance->increment('amount', $deposit['amount']);
-            return true;
+            return DB::transaction(function () use ($deposit, $userId) {
+
+                $balance = Balance::firstOrCreate(
+                    ['user_id' => $userId],
+                    ['amount' => 0]
+                );
+
+                $balance->increment('amount', $deposit['amount']);
+                return true;
+            });
+
         });
     }
 
