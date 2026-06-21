@@ -231,11 +231,11 @@ return [
         */
         'swoole' => [
             'options' => [
-                'worker_num' => 8,        
-                'task_worker_num' => 2,   
-                'max_request' => 1000,     
-                'dispatch_mode' => 2,      
-                'backlog' => 8192,         
+                'worker_num' => 6,
+                'task_worker_num' => 2,
+                'max_request' => 1000,
+                'dispatch_mode' => 2,
+                'backlog' => 8192,
             ],
         ],
 ];

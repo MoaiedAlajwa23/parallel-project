@@ -12,13 +12,14 @@ use App\Traits\ResourceTrait;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller as BaseController;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 class InteractController extends BaseController
 {
     use ResourceTrait;
     public function __construct(protected InteractService $interactService)
     {
-        $this->middleware(['auth:sanctum', 'customer'])->except('listProducts', 'listCategories', 'bestSellers', 'showProductById');
+        $this->middleware(['auth:sanctum', 'customer'])->except('listProducts', 'listCategories', 'bestSellers', 'showProductById', 'bestSellersSlow');
     }
 
     public function listProducts(Request $request)
@@ -54,6 +55,19 @@ class InteractController extends BaseController
     }
 
 
+
+    public function bestSellersSlow()
+    {
+        try {
+            $bestSellers = $this->interactService->bestSellersSlow();
+            return $this->successResponse($bestSellers, 'The best-selling products have been successfully brought in');
+
+        } catch (\Throwable $th) {
+            return $this->errorResponse('An internal error occurred', 500);
+        }
+    }
+
+
     public function listCategories(Request $request)
     {
         $categories = $this->interactService->listCategories($request);
@@ -63,7 +77,7 @@ class InteractController extends BaseController
         return $this->successResponse($categories, 'Categories retrieved successfully');
     }
 
-    public function addToCart(AddToCartRequest $request)
+    public function addToCart(Request $request)
     {
 
         try {

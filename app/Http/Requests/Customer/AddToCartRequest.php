@@ -23,7 +23,7 @@ class AddToCartRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'product_id' => 'required|exists:products,id|unique:cart_products,product_id,NULL,id,cart_id,' . auth()->user()->cart()->firstOrCreate()->id,
+            'product_id' => 'required',
             'quantity' => 'required|integer|min:1',
         ];
     }
@@ -43,11 +43,11 @@ class AddToCartRequest extends FormRequest
     {
         return [
             'product_id.required' => 'Product ID is required',
-            'product_id.exists' => 'Product not found',
-            'quantity.required' => 'Quantity is required',
+            // 'product_id.exists' => 'Product not found',
+            // 'quantity.required' => 'Quantity is required',
             'quantity.integer' => 'Quantity must be an integer',
             'quantity.min' => 'Quantity must be at least 1',
-            'product_id.unique' => 'Product is already in the cart',
+            // 'product_id.unique' => 'Product is already in the cart', 
         ];
     }
 }
